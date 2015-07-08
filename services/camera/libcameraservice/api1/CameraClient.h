@@ -181,6 +181,7 @@ private:
     bool                    lockIfMessageWanted(int32_t msgType);
 
     int                     mBurstCnt;
+    bool                    mLongshotEnabled;
 };
 
 }
