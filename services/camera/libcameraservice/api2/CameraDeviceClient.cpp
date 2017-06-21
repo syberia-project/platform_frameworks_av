@@ -102,6 +102,14 @@ CameraDeviceClient::CameraDeviceClient(const sp<CameraService>& cameraService,
     mRequestIdCounter(0),
     mOverrideForPerfClass(overrideForPerfClass) {
 
+    SessionConfigurationUtils::mPrivilegedClient = false;
+    char value[PROPERTY_VALUE_MAX];
+    property_get("persist.vendor.camera.privapp.list", value, "");
+    String16 packagelist(value);
+    if (packagelist.contains(clientPackageName.string())) {
+        SessionConfigurationUtils::mPrivilegedClient = true;
+    }
+
     ATRACE_CALL();
     ALOGI("CameraDeviceClient %s: Opened", cameraId.string());
 }

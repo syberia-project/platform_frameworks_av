@@ -157,6 +157,7 @@ public:
     static bool IS_PERF_CLASS;
     static const int32_t PERF_CLASS_JPEG_THRESH_W = 1920;
     static const int32_t PERF_CLASS_JPEG_THRESH_H = 1080;
+    static inline bool mPrivilegedClient;
 };
 
 } // camera3
