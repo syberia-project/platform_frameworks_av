@@ -132,6 +132,13 @@ cc_library_shared {
         "-Werror",
         "-Wno-ignored-qualifiers",
     ],
+    product_variables: {
+        syberia: {
+            Target_camera_needs_client_info: {
+                cppflags: ["-DTARGET_CAMERA_NEEDS_CLIENT_INFO"],
+            },
+        },
+    },
 
 }
 
