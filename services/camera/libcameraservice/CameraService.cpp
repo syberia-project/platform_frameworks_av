@@ -2326,11 +2326,7 @@ status_t CameraService::BasicClient::startCameraOps() {
 #ifdef TARGET_NEEDS_CLIENT_INFO
     std::ofstream cpf("/data/misc/camera/client_package_name");
     std::string cpn = String8(mClientPackageName).string();
-    if (cpn.compare("com.oneplus.camera") == 0) {
-        cpf << "com.oneplus.camera";
-    } else {
-        cpf << "";
-    }
+    cpf << cpn;
 #endif
     return OK;
 }
