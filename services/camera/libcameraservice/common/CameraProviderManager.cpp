@@ -639,7 +639,7 @@ status_t CameraProviderManager::ProviderInfo::addDevice(const std::string& name,
         // supports openLegacy.
         if (std::find(mUniqueAPI1CompatibleCameraIds.begin(), mUniqueAPI1CompatibleCameraIds.end(),
                 id) == mUniqueAPI1CompatibleCameraIds.end()) {
-        mUniqueAPI1CompatibleCameraIds.push_back(id);
+            mUniqueAPI1CompatibleCameraIds.push_back(id);
         }
     }
 
