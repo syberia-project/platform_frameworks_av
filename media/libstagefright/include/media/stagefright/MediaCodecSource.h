@@ -66,6 +66,8 @@ struct MediaCodecSource : public MediaSource,
     // MediaBufferObserver
     virtual void signalBufferReturned(MediaBufferBase *buffer);
 
+    virtual void notifyPerformanceMode();
+
     // for AHandlerReflector
     void onMessageReceived(const sp<AMessage> &msg);
 
@@ -158,6 +160,10 @@ private:
     Mutexed<Output> mOutput;
 
     int32_t mGeneration;
+
+    int64_t mPrevBufferTimestampUs;
+    bool mIsHFR;
+    int32_t mBatchSize;
 
     DISALLOW_EVIL_CONSTRUCTORS(MediaCodecSource);
 };

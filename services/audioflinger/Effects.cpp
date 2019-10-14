@@ -54,6 +54,9 @@
 
 namespace android {
 
+static const effect_uuid_t IID_VISUALIZER = {0x1d0a1a53, 0x7d5d, 0x48f2, 0x8e71, {0x27,
+                                             0xfb, 0xd1, 0x0d, 0x84, 0x2c}};
+
 // ----------------------------------------------------------------------------
 //  EffectModule implementation
 // ----------------------------------------------------------------------------
@@ -107,7 +110,8 @@ AudioFlinger::EffectModule::EffectModule(ThreadBase *thread,
         goto Error;
     }
 
-    setOffloaded(thread->type() == ThreadBase::OFFLOAD, thread->id());
+    setOffloaded((thread->type() == ThreadBase::OFFLOAD || thread->type() == ThreadBase::DIRECT),
+                 thread->id());
     ALOGV("Constructor success name %s, Interface %p", mDescriptor.name, mEffectInterface.get());
 
     return;
@@ -1650,18 +1654,27 @@ status_t AudioFlinger::EffectHandle::enable()
         mEnabled = false;
     } else {
         if (thread != 0) {
-            if (thread->type() == ThreadBase::OFFLOAD || thread->type() == ThreadBase::MMAP) {
+            if (thread->type() == ThreadBase::OFFLOAD ||
+                thread->type() == ThreadBase::MMAP ||
+                thread->type() == ThreadBase::DIRECT) {
                 Mutex::Autolock _l(thread->mLock);
                 thread->broadcast_l();
             }
             if (!effect->isOffloadable()) {
-                if (thread->type() == ThreadBase::OFFLOAD) {
+                if (thread->type() == ThreadBase::OFFLOAD ||
+                    thread->type() == ThreadBase::DIRECT) {
                     PlaybackThread *t = (PlaybackThread *)thread.get();
                     t->invalidateTracks(AUDIO_STREAM_MUSIC);
                 }
                 if (effect->sessionId() == AUDIO_SESSION_OUTPUT_MIX) {
                     thread->mAudioFlinger->onNonOffloadableGlobalEffectEnable();
                 }
+            }
+            if ((thread->type() == ThreadBase::OFFLOAD) && (AudioSystem::getDeviceConnectionState(AUDIO_DEVICE_OUT_PROXY, "")
+                == AUDIO_POLICY_DEVICE_STATE_AVAILABLE) && (memcmp (&effect->mDescriptor.uuid, &IID_VISUALIZER,
+                sizeof (effect_uuid_t)) == 0)) {
+                PlaybackThread *t = (PlaybackThread *)thread.get();
+                t->invalidateTracks(AUDIO_STREAM_MUSIC);
             }
         }
     }
@@ -1696,7 +1709,9 @@ status_t AudioFlinger::EffectHandle::disable()
     sp<ThreadBase> thread = effect->thread().promote();
     if (thread != 0) {
         thread->checkSuspendOnEffectEnabled(effect, false, effect->sessionId());
-        if (thread->type() == ThreadBase::OFFLOAD || thread->type() == ThreadBase::MMAP) {
+        if (thread->type() == ThreadBase::OFFLOAD ||
+            thread->type() == ThreadBase::MMAP ||
+            thread->type() == ThreadBase::DIRECT) {
             Mutex::Autolock _l(thread->mLock);
             thread->broadcast_l();
         }
@@ -2058,7 +2073,8 @@ void AudioFlinger::EffectChain::process_l()
     // - on an OFFLOAD thread
     // - no more tracks are on the session and the effect tail has been rendered
     bool doProcess = (thread->type() != ThreadBase::OFFLOAD)
-                  && (thread->type() != ThreadBase::MMAP);
+                  && (thread->type() != ThreadBase::MMAP)
+                  && (thread->type() != ThreadBase::DIRECT);
     if (!isGlobalSession) {
         bool tracksOnSession = (trackCnt() != 0);
 

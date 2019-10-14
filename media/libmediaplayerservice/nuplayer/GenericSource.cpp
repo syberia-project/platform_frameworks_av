@@ -43,7 +43,7 @@
 #include <media/stagefright/Utils.h>
 #include "../../libstagefright/include/NuCachedSource2.h"
 #include "../../libstagefright/include/HTTPBase.h"
-
+#include "mediaplayerservice/AVNuExtensions.h"
 namespace android {
 
 static const int kInitialMarkMs        = 5000;  // 5secs
@@ -319,7 +319,6 @@ status_t NuPlayer::GenericSource::startSources() {
         ALOGE("failed to start audio track!");
         return UNKNOWN_ERROR;
     }
-
     if (mVideoTrack.mSource != NULL && mVideoTrack.mSource->start() != OK) {
         ALOGE("failed to start video track!");
         return UNKNOWN_ERROR;
