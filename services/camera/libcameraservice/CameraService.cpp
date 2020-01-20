@@ -80,7 +80,9 @@
 #include "utils/TagMonitor.h"
 #include "utils/CameraThreadState.h"
 
+#ifdef MOTORIZED_CAMERA_DEVICE
 #include <vendor/lineage/camera/motor/1.0/ICameraMotor.h>
+#endif
 
 namespace {
     const char* kPermissionServiceName = "permission";
@@ -97,7 +99,9 @@ using hardware::ICameraServiceProxy;
 using hardware::ICameraServiceListener;
 using hardware::camera::common::V1_0::CameraDeviceStatus;
 using hardware::camera::common::V1_0::TorchModeStatus;
+#ifdef MOTORIZED_CAMERA_DEVICE
 using vendor::lineage::camera::motor::V1_0::ICameraMotor;
+#endif
 
 // ----------------------------------------------------------------------------
 // Logging support -- this is for debugging only
@@ -1541,10 +1545,12 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const String8&
             // Otherwise, add client to active clients list
             finishConnectLocked(client, partial);
 
+#ifdef MOTORIZED_CAMERA_DEVICE
             sp<ICameraMotor> cameraMotor = ICameraMotor::getService();
             if (cameraMotor != nullptr) {
                 cameraMotor->onConnect(cameraId.string());
             }
+#endif
         }
     } // lock is destroyed, allow further connect calls
 
@@ -2408,10 +2414,12 @@ binder::Status CameraService::BasicClient::disconnect() {
     }
     mDisconnected = true;
 
+#ifdef MOTORIZED_CAMERA_DEVICE
     sp<ICameraMotor> cameraMotor = ICameraMotor::getService();
     if (cameraMotor != nullptr) {
         cameraMotor->onDisconnect(mCameraIdStr.string());
     }
+#endif
 
     sCameraService->removeByClient(this);
     sCameraService->logDisconnected(mCameraIdStr, mClientPid, String8(mClientPackageName));
