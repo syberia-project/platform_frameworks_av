@@ -713,7 +713,7 @@ void CCodecBufferChannel::feedInputBufferIfAvailableInternal() {
         return;
     } else {
         Mutexed<Output>::Locked output(mOutput);
-        if (output->buffers->numClientBuffers() >= output->numSlots) {
+        if (!output->buffers || output->buffers->numClientBuffers() >= output->numSlots) {
             return;
         }
     }
@@ -868,14 +868,19 @@ status_t CCodecBufferChannel::renderOutputBuffer(
                 .minLuminance = hdrStaticInfo->mastering.minLuminance,
             };
 
-            struct android_cta861_3_metadata cta861_meta = {
-                .maxContentLightLevel = hdrStaticInfo->maxCll,
-                .maxFrameAverageLightLevel = hdrStaticInfo->maxFall,
-            };
-
-            hdr.validTypes = HdrMetadata::SMPTE2086 | HdrMetadata::CTA861_3;
+            hdr.validTypes = HdrMetadata::SMPTE2086;
             hdr.smpte2086 = smpte2086_meta;
-            hdr.cta8613 = cta861_meta;
+
+            // If the content light level fields are 0, do not use them, it
+            // indicates the value may not be present in the stream.
+            if (hdrStaticInfo->maxCll > 0.0f && hdrStaticInfo->maxFall > 0.0f) {
+                struct android_cta861_3_metadata cta861_meta = {
+                    .maxContentLightLevel = hdrStaticInfo->maxCll,
+                    .maxFrameAverageLightLevel = hdrStaticInfo->maxFall,
+                };
+                hdr.validTypes |= HdrMetadata::CTA861_3;
+                hdr.cta8613 = cta861_meta;
+            }
         }
         if (hdr10PlusInfo) {
             hdr.validTypes |= HdrMetadata::HDR10PLUS;
@@ -1396,6 +1401,30 @@ void CCodecBufferChannel::stop() {
     }
 }
 
+void CCodecBufferChannel::reset() {
+    stop();
+    {
+        Mutexed<Input>::Locked input(mInput);
+        input->buffers.reset(new DummyInputBuffers(""));
+    }
+    {
+        Mutexed<Output>::Locked output(mOutput);
+        output->buffers.reset();
+    }
+}
+
+void CCodecBufferChannel::release() {
+    mComponent.reset();
+    mInputAllocator.reset();
+    mOutputSurface.lock()->surface.clear();
+    {
+        Mutexed<BlockPools>::Locked blockPools{mBlockPools};
+        blockPools->inputPool.reset();
+        blockPools->outputPoolIntf.reset();
+    }
+}
+
+
 void CCodecBufferChannel::flush(const std::list<std::unique_ptr<C2Work>> &flushedWork) {
     ALOGV("[%s] flush", mName);
     {
@@ -1426,7 +1455,9 @@ void CCodecBufferChannel::flush(const std::list<std::unique_ptr<C2Work>> &flushe
     }
     {
         Mutexed<Output>::Locked output(mOutput);
-        output->buffers->flush(flushedWork);
+        if (output->buffers) {
+            output->buffers->flush(flushedWork);
+        }
     }
     mReorderStash.lock()->flush();
     mPipelineWatcher.lock()->flush();
@@ -1464,20 +1495,25 @@ bool CCodecBufferChannel::handleWork(
         std::unique_ptr<C2Work> work,
         const sp<AMessage> &outputFormat,
         const C2StreamInitDataInfo::output *initData) {
-    if (outputFormat != nullptr) {
+    {
         Mutexed<Output>::Locked output(mOutput);
-        ALOGD("[%s] onWorkDone: output format changed to %s",
-                mName, outputFormat->debugString().c_str());
-        output->buffers->setFormat(outputFormat);
+        if (!output->buffers) {
+            return false;
+        }
+        if (outputFormat != nullptr) {
+            ALOGD("[%s] onWorkDone: output format changed to %s",
+                    mName, outputFormat->debugString().c_str());
+            output->buffers->setFormat(outputFormat);
 
-        AString mediaType;
-        if (outputFormat->findString(KEY_MIME, &mediaType)
-                && mediaType == MIMETYPE_AUDIO_RAW) {
-            int32_t channelCount;
-            int32_t sampleRate;
-            if (outputFormat->findInt32(KEY_CHANNEL_COUNT, &channelCount)
-                    && outputFormat->findInt32(KEY_SAMPLE_RATE, &sampleRate)) {
-                output->buffers->updateSkipCutBuffer(sampleRate, channelCount);
+            AString mediaType;
+            if (outputFormat->findString(KEY_MIME, &mediaType)
+                    && mediaType == MIMETYPE_AUDIO_RAW) {
+                int32_t channelCount;
+                int32_t sampleRate;
+                if (outputFormat->findInt32(KEY_CHANNEL_COUNT, &channelCount)
+                        && outputFormat->findInt32(KEY_SAMPLE_RATE, &sampleRate)) {
+                    output->buffers->updateSkipCutBuffer(sampleRate, channelCount);
+                }
             }
         }
     }
@@ -1601,6 +1637,9 @@ bool CCodecBufferChannel::handleWork(
                         size_t numInputSlots = mInput.lock()->numSlots;
                         {
                             Mutexed<Output>::Locked output(mOutput);
+                            if (!output->buffers) {
+                                return false;
+                            }
                             output->outputDelay = outputDelay.value;
                             numOutputSlots = outputDelay.value + kSmoothnessFactor;
                             if (output->numSlots < numOutputSlots) {
@@ -1690,7 +1729,7 @@ bool CCodecBufferChannel::handleWork(
 
     if (initData != nullptr) {
         Mutexed<Output>::Locked output(mOutput);
-        if (output->buffers->registerCsd(initData, &index, &outBuffer) == OK) {
+        if (output->buffers && output->buffers->registerCsd(initData, &index, &outBuffer) == OK) {
             outBuffer->meta()->setInt64("timeUs", timestamp.peek());
             outBuffer->meta()->setInt32("flags", MediaCodec::BUFFER_FLAG_CODECCONFIG);
             ALOGV("[%s] onWorkDone: csd index = %zu [%p]", mName, index, outBuffer.get());
@@ -1753,6 +1792,9 @@ void CCodecBufferChannel::sendOutputBuffers() {
         }
 
         Mutexed<Output>::Locked output(mOutput);
+        if (!output->buffers) {
+            return;
+        }
         status_t err = output->buffers->registerBuffer(entry.buffer, &index, &outBuffer);
         if (err != OK) {
             bool outputBuffersChanged = false;
