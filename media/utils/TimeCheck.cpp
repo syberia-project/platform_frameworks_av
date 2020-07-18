@@ -18,6 +18,7 @@
 #include <utils/Log.h>
 #include <media/TimeCheck.h>
 #include <media/EventLog.h>
+#include <cutils/properties.h>
 
 namespace android {
 
@@ -28,9 +29,16 @@ sp<TimeCheck::TimeCheckThread> TimeCheck::getTimeCheckThread()
     return sTimeCheckThread;
 }
 
-TimeCheck::TimeCheck(const char *tag, uint32_t timeoutMs)
-    : mEndTimeNs(getTimeCheckThread()->startMonitoring(tag, timeoutMs))
+
+static uint32_t timeOutMs = (uint32_t)property_get_int32("vendor.audio.hal.boot.timeout.ms", TimeCheck::kDefaultTimeOutMs);
+
+TimeCheck::TimeCheck(const char *tag, bool systemReady)
 {
+    if (systemReady) {
+        timeOutMs = kDefaultTimeOutMs;
+        ALOGI("System is ready use default timeout: %d msec", timeOutMs);
+    }
+    mEndTimeNs = getTimeCheckThread()->startMonitoring(tag, timeOutMs);
 }
 
 TimeCheck::~TimeCheck() {
@@ -82,10 +90,10 @@ bool TimeCheck::TimeCheckThread::threadLoop()
         if (waitTimeNs > 0) {
             status = mCond.waitRelative(mMutex, waitTimeNs);
         }
-    }
-    if (status != NO_ERROR) {
-        LOG_EVENT_STRING(LOGTAG_AUDIO_BINDER_TIMEOUT, tag);
-        LOG_ALWAYS_FATAL("TimeCheck timeout for %s", tag);
+        if (status != NO_ERROR) {
+            LOG_EVENT_STRING(LOGTAG_AUDIO_BINDER_TIMEOUT, tag);
+            LOG_ALWAYS_FATAL("TimeCheck timeout for %s", tag);
+        }
     }
     return true;
 }
