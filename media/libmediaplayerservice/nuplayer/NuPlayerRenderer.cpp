@@ -1319,6 +1319,15 @@ void NuPlayer::Renderer::postDrainVideoQueue() {
         return;
     }
 
+    // notify preroll completed immediately when we are ready to post msg to drain video buf, so that
+    // NuPlayer could wake up renderer early to resume AudioSink since audio sink resume has latency
+    if (mPaused && !mVideoSampleReceived) {
+        sp<AMessage> notify = mNotify->dup();
+        notify->setInt32("what", kWhatVideoPrerollComplete);
+        ALOGI("NOTE: notifying video preroll complete");
+        notify->post();
+    }
+
     int64_t nowUs = ALooper::GetNowUs();
     if (mFlags & FLAG_REAL_TIME) {
         int64_t realTimeUs;
@@ -1348,6 +1357,19 @@ void NuPlayer::Renderer::postDrainVideoQueue() {
             clearAnchorTime();
         }
         if (mAnchorTimeMediaUs < 0) {
+            if (!mVideoSampleReceived && mHasAudio) {
+                // this is the first video buffer to be drained, and we know there is audio track
+                // exist. sicne audio start has inevitable latency, we wait audio for a while, give
+                // audio a chance to update anchor time. video doesn't update anchor this time to
+                // alleviate a/v sync issue
+                auto audioStartLatency = 1000 * (mAudioSink->latency()
+                                - (1000 * mAudioSink->frameCount() / mAudioSink->getSampleRate()));
+                ALOGV("First video buffer, wait audio for a while due to audio start latency(%zuus)",
+                        audioStartLatency);
+                msg->post(audioStartLatency);
+                mDrainVideoQueuePending = true;
+                return;
+            }
             mMediaClock->updateAnchor(mediaTimeUs, nowUs,
                 (mHasAudio ? -1 : mediaTimeUs + kDefaultVideoFrameIntervalUs));
             mAnchorTimeMediaUs = mediaTimeUs;
@@ -1362,10 +1384,12 @@ void NuPlayer::Renderer::postDrainVideoQueue() {
     if (!mVideoSampleReceived || mediaTimeUs < mAudioFirstAnchorTimeMediaUs || getVideoLateByUs() > 40000) {
         msg->post();
     } else {
-        int64_t twoVsyncsUs = 2 * (mVideoScheduler->getVsyncPeriod() / 1000);
+        int64_t vsyncPeriodUs = mVideoScheduler->getVsyncPeriod() / 1000;
+        int64_t preVsyncsUs = vsyncPeriodUs ? (45000 / vsyncPeriodUs) * vsyncPeriodUs : 0ll;
 
-        // post 2 display refreshes before rendering is due
-        mMediaClock->addTimer(msg, mediaTimeUs, -twoVsyncsUs);
+        // post "45 ms / vsyncPeriod" display refreshes before rendering is due
+        // (ITU max-allowed video-lead-time is 45 ms)
+        mMediaClock->addTimer(msg, mediaTimeUs, -preVsyncsUs);
     }
 
     mDrainVideoQueuePending = true;
@@ -1447,12 +1471,6 @@ void NuPlayer::Renderer::onDrainVideoQueue() {
     mVideoQueue.erase(mVideoQueue.begin());
     entry = NULL;
 
-    if (mPaused && !mVideoSampleReceived) {
-        sp<AMessage> notify = mNotify->dup();
-        notify->setInt32("what", kWhatVideoPrerollComplete);
-        ALOGI("NOTE: notifying video preroll complete");
-        notify->post();
-    }
     mVideoSampleReceived = true;
 
     if (!mPaused) {
