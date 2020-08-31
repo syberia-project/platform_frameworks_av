@@ -806,14 +806,14 @@ status_t NuPlayerDriver::getParameter(int key, Parcel *reply) {
     if (key == FOURCC('m','t','r','X')) {
         // mtrX -- a play on 'metrics' (not matrix)
         // gather current info all together, parcel it, and send it back
-        updateMetrics("api");
+            updateMetrics("api");
 
         // ensure mAnalyticsItem stability while writing to parcel
         Mutex::Autolock autoLock(mMetricsLock);
         if (mAnalyticsItem != NULL) {
             mAnalyticsItem->writeToParcel(reply);
         }
-        return OK;
+            return OK;
     }
 
     return INVALID_OPERATION;
