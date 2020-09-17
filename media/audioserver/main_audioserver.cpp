@@ -17,6 +17,7 @@
 #define LOG_TAG "audioserver"
 //#define LOG_NDEBUG 0
 
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <sys/prctl.h>
 #include <sys/wait.h>
@@ -27,6 +28,7 @@
 #include <binder/IServiceManager.h>
 #include <hidl/HidlTransportSupport.h>
 #include <mediautils/LimitProcessMemory.h>
+#include <mediautils/TimeCheck.h>
 #include <utils/Log.h>
 
 // from LOCAL_C_INCLUDES
@@ -39,6 +41,21 @@
 
 using namespace android;
 
+constexpr const char kLibVRAudioPath [] = "libvraudio.so";
+
+void instantiateVRAudioServer() {
+    void *vrLibHandle = dlopen(kLibVRAudioPath, RTLD_NOW | RTLD_NODELETE);
+    if (vrLibHandle == nullptr)
+        ALOGI("Failed to load library: %s (%s)", kLibVRAudioPath, dlerror());
+    else {
+        auto instantiate = reinterpret_cast<void (*)()>(dlsym(vrLibHandle, "instantiate"));
+        if (instantiate == nullptr)
+            ALOGW("Failed to find symbol: instantiate (%s)", dlerror());
+        else
+            instantiate();
+    }
+}
+
 int main(int argc __unused, char **argv)
 {
     // TODO: update with refined parameters
@@ -50,6 +67,10 @@ int main(int argc __unused, char **argv)
     signal(SIGPIPE, SIG_IGN);
 
     bool doLog = (bool) property_get_bool("ro.test_harness", 0);
+
+    uint32_t timeOutMs = (uint32_t)property_get_int32("vendor.audio.hal.boot.timeout.ms", TimeCheck::kDefaultTimeOutMs);
+
+    TimeCheck::setSystemReadyTimeoutMs(timeOutMs);
 
     pid_t childPid;
     // FIXME The advantage of making the process containing media.log service the parent process of
@@ -137,6 +158,7 @@ int main(int argc __unused, char **argv)
         ALOGI("ServiceManager: %p", sm.get());
         AudioFlinger::instantiate();
         AudioPolicyService::instantiate();
+        instantiateVRAudioServer();
 
         // AAudioService should only be used in OC-MR1 and later.
         // And only enable the AAudioService if the system MMAP policy explicitly allows it.

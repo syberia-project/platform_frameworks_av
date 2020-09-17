@@ -506,7 +506,7 @@ protected:
         // when a device is disconnected, checks if an output is not used any more and
         // returns its handle if any.
         // transfers the audio tracks and effects from one output thread to another accordingly.
-        virtual status_t checkOutputsForDevice(const sp<DeviceDescriptor>& device,
+        status_t checkOutputsForDevice(const sp<DeviceDescriptor>& device,
                                        audio_policy_dev_state_t state,
                                        SortedVector<audio_io_handle_t>& outputs);
 
@@ -787,9 +787,10 @@ protected:
         std::unordered_set<audio_format_t> mManualSurroundFormats;
 
         std::unordered_map<uid_t, audio_flags_mask_t> mAllowedCapturePolicies;
-protected:
+private:
         void onNewAudioModulesAvailableInt(DeviceVector *newDevices);
 
+protected:
         // Add or remove AC3 DTS encodings based on user preferences.
         void modifySurroundFormats(const sp<DeviceDescriptor>& devDesc, FormatVector *formatsPtr);
         void modifySurroundChannelMasks(ChannelMaskSet *channelMasksPtr);

@@ -123,6 +123,12 @@ void AudioOutputDescriptor::setClientActive(const sp<TrackClientDescriptor>& cli
     client->setActive(active);
 }
 
+bool AudioOutputDescriptor::isClientActive(const sp<TrackClientDescriptor>& client)
+{
+    auto clientIter = std::find(begin(mActiveClients), end(mActiveClients), client);
+    return (clientIter != end(mActiveClients));
+}
+
 bool AudioOutputDescriptor::isActive(VolumeSource vs, uint32_t inPastMs, nsecs_t sysTime) const
 {
     return (vs == VOLUME_SOURCE_NONE) ?
@@ -745,6 +751,23 @@ audio_io_handle_t SwAudioOutputCollection::getA2dpOutput() const
         }
     }
     return 0;
+}
+
+bool SwAudioOutputCollection::isA2dpOnPrimary() const
+{
+    sp<SwAudioOutputDescriptor> primaryOutput = getPrimaryOutput();
+
+    if ((primaryOutput != NULL) && (primaryOutput->mProfile != NULL)
+        && (primaryOutput->mProfile->getModule() != NULL)) {
+        Vector <sp<IOProfile>> primaryOutputProfiles =
+            primaryOutput->mProfile->getModule()->mOutputProfiles;
+        for (size_t j = 0; j < primaryOutputProfiles.size(); j++) {
+            if (primaryOutputProfiles[j]->supportsDeviceTypes(getAudioDeviceOutAllA2dpSet())) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 bool SwAudioOutputCollection::isA2dpOffloadedOnPrimary() const

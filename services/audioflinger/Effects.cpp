@@ -292,6 +292,9 @@ ssize_t AudioFlinger::EffectBase::removeHandle_l(EffectHandle *handle)
         }
     }
 
+    // Prevent calls to process() and other functions on effect interface from now on.
+    // The effect engine will be released by the destructor when the last strong reference on
+    // this object is released which can happen after next process is called.
     if (mHandles.size() == 0 && !mPinned) {
         mState = DESTROYED;
     }
@@ -543,7 +546,7 @@ AudioFlinger::EffectModule::EffectModule(const sp<AudioFlinger::EffectCallbackIn
         goto Error;
     }
 
-    setOffloaded(callback->isOffload(), callback->io());
+    setOffloaded(callback->isOffloadOrDirect(), callback->io());
     ALOGV("Constructor success name %s, Interface %p", mDescriptor.name, mEffectInterface.get());
 
     return;
@@ -563,20 +566,6 @@ AudioFlinger::EffectModule::~EffectModule()
         release_l();
     }
 
-}
-
-ssize_t AudioFlinger::EffectModule::removeHandle_l(EffectHandle *handle)
-{
-    ssize_t status = EffectBase::removeHandle_l(handle);
-
-    // Prevent calls to process() and other functions on effect interface from now on.
-    // The effect engine will be released by the destructor when the last strong reference on
-    // this object is released which can happen after next process is called.
-    if (status == 0 && !mPinned) {
-        mEffectInterface->close();
-    }
-
-    return status;
 }
 
 bool AudioFlinger::EffectModule::updateState() {
@@ -2038,7 +2027,7 @@ void AudioFlinger::EffectChain::process_l()
     // never process effects when:
     // - on an OFFLOAD thread
     // - no more tracks are on the session and the effect tail has been rendered
-    bool doProcess = !mEffectCallback->isOffloadOrMmap();
+    bool doProcess = !mEffectCallback->isOffloadOrMmap() && !mEffectCallback->isOffloadOrDirect();
     if (!audio_is_global_session(mSessionId)) {
         bool tracksOnSession = (trackCnt() != 0);
 

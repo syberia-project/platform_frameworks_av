@@ -1,4 +1,4 @@
-/*
+/*/*
  * Copyright (C) 2015 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -182,6 +182,7 @@ public:
      * Active ref count of the client will be incremented/decremented through setActive API
      */
     virtual void setClientActive(const sp<TrackClientDescriptor>& client, bool active);
+    bool isClientActive(const sp<TrackClientDescriptor>& client);
 
     bool isActive(uint32_t inPastMs) const;
     bool isActive(VolumeSource volumeSource = VOLUME_SOURCE_NONE,
@@ -279,6 +280,7 @@ public:
                                   product_strategy_t strategy = PRODUCT_STRATEGY_NONE,
                                   bool preferredDeviceOnly = false) const;
 
+    audio_io_handle_t mIoHandle;           // output handle
     // override ClientMapHandler to abort when removing a client when active.
     void removeClient(audio_port_handle_t portId) override {
         auto client = getClient(portId);
@@ -305,7 +307,6 @@ public:
 
     DeviceVector mDevices; /**< current devices this output is routed to */
     wp<AudioPolicyMix> mPolicyMix;  // non NULL when used by a dynamic policy
-    audio_io_handle_t mIoHandle;           // output handle
 
 protected:
     const sp<PolicyAudioPort> mPolicyAudioPort;
@@ -492,6 +493,11 @@ public:
      * returns the A2DP output handle if it is open or 0 otherwise
      */
     audio_io_handle_t getA2dpOutput() const;
+
+    /**
+     * return true if primary HAL supports A2DP Playback
+     */
+    bool isA2dpOnPrimary() const;
 
     /**
      * returns true if primary HAL supports A2DP Offload

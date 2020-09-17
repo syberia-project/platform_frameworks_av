@@ -95,7 +95,8 @@ const MediaProfiles::NameToTagMap MediaProfiles::sAudioEncoderNameMap[] = {
     {"aac",    AUDIO_ENCODER_AAC},
     {"heaac",  AUDIO_ENCODER_HE_AAC},
     {"aaceld", AUDIO_ENCODER_AAC_ELD},
-    {"opus",   AUDIO_ENCODER_OPUS}
+    {"opus",   AUDIO_ENCODER_OPUS},
+    {"lpcm",  AUDIO_ENCODER_LPCM},
 };
 
 const MediaProfiles::NameToTagMap MediaProfiles::sFileFormatMap[] = {
@@ -151,6 +152,8 @@ const MediaProfiles::NameToTagMap MediaProfiles::sCamcorderQualityNameMap[] = {
     {"2k", CAMCORDER_QUALITY_2k},
     {"timelapseqhd", CAMCORDER_QUALITY_TIME_LAPSE_QHD},
     {"timelapse2k", CAMCORDER_QUALITY_TIME_LAPSE_2k},
+    {"8kuhd", CAMCORDER_QUALITY_8KUHD},
+    {"timelapse8kuhd", CAMCORDER_QUALITY_TIME_LAPSE_8KUHD},
 };
 
 #if LOG_NDEBUG
@@ -486,8 +489,10 @@ MediaProfiles::startElementHandler(void *userData, const char *name, const char 
 }
 
 static bool isCamcorderProfile(camcorder_quality quality) {
-    return quality >= CAMCORDER_QUALITY_LIST_START &&
-           quality <= CAMCORDER_QUALITY_LIST_END;
+    return (quality >= CAMCORDER_QUALITY_LIST_START &&
+           quality <= CAMCORDER_QUALITY_LIST_END) ||
+           (quality >= CAMCORDER_QUALITY_VENDOR_LIST_START &&
+           quality <= CAMCORDER_QUALITY_VENDOR_LIST_END);
 }
 
 static bool isTimelapseProfile(camcorder_quality quality) {
@@ -650,6 +655,7 @@ void MediaProfiles::checkAndAddRequiredProfilesIfNecessary() {
 /*static*/ MediaProfiles*
 MediaProfiles::getInstance()
 {
+    char platform[PROPERTY_VALUE_MAX] = {0};
     ALOGV("getInstance");
     Mutex::Autolock lock(sLock);
     if (!sIsInitialized) {
@@ -670,6 +676,44 @@ MediaProfiles::getInstance()
                 sInstance = createInstanceFromXmlFile(xmlFile);
             }
         } else {
+                if (!strncmp(value, "/vendor/etc", strlen("/vendor/etc"))) {
+                    property_get("ro.board.platform", platform, NULL);
+                    if (!strcmp(platform, "msm8953")){
+                        if (property_get("vendor.media.target.version", value, "0") &&
+                            (atoi(value) == 1)){
+                            strlcpy(value, "/vendor/etc/media_profiles_8953_v1.xml",
+                                    PROPERTY_VALUE_MAX);
+                        } else {
+                            strlcpy(value, "/vendor/etc/media_profiles_vendor.xml",
+                                    PROPERTY_VALUE_MAX);
+                        }
+                    } else if (!strcmp(platform, "sdm660")) {
+                        property_get("vendor.media.target.version", value, "0");
+                        if (atoi(value) == 1) {
+                            strlcpy(value, "/vendor/etc/media_profiles_sdm660_v1.xml",
+                                    PROPERTY_VALUE_MAX);
+                        } else {
+                            strlcpy(value, "/vendor/etc/media_profiles_vendor.xml",
+                                    PROPERTY_VALUE_MAX);
+                        }
+                    } else if (!strcmp(platform, "bengal")) {
+                        property_get("vendor.sys.media.target.version", value, "0");
+                        if (atoi(value) == 2 || atoi(value) == 3) {
+                            strlcpy(value, "/vendor/etc/media_profiles_scuba.xml",
+                                    PROPERTY_VALUE_MAX);
+                        } else {
+                            strlcpy(value, "/vendor/etc/media_profiles_vendor.xml",
+                                    PROPERTY_VALUE_MAX);
+                        }
+                    }
+                    char variant[PROPERTY_VALUE_MAX];
+                    if (property_get("ro.media.xml_variant.codecs", variant, NULL) > 0) {
+                        std::string xmlPath = std::string("/vendor/etc/media_profiles") +
+                                              std::string(variant) + std::string(".xml");
+                        strlcpy(value, xmlPath.c_str(), PROPERTY_VALUE_MAX);
+                        ALOGI("Profiles xml path: %s", value);
+                    }
+                }
             sInstance = createInstanceFromXmlFile(value);
         }
         CHECK(sInstance != NULL);
@@ -846,6 +890,7 @@ MediaProfiles::createDefaultCamcorderProfiles(MediaProfiles *profiles)
 MediaProfiles::createDefaultAudioEncoders(MediaProfiles *profiles)
 {
     profiles->mAudioEncoders.add(createDefaultAmrNBEncoderCap());
+    profiles->mAudioEncoders.add(createDefaultLpcmEncoderCap());
 }
 
 /*static*/ void
@@ -878,6 +923,14 @@ MediaProfiles::createDefaultAmrNBEncoderCap()
 {
     return new MediaProfiles::AudioEncoderCap(
         AUDIO_ENCODER_AMR_NB, 5525, 12200, 8000, 8000, 1, 1);
+}
+
+
+/*static*/ MediaProfiles::AudioEncoderCap*
+MediaProfiles::createDefaultLpcmEncoderCap()
+{
+    return new MediaProfiles::AudioEncoderCap(
+        AUDIO_ENCODER_LPCM, 768000, 4608000, 8000, 48000, 1, 6);
 }
 
 /*static*/ void

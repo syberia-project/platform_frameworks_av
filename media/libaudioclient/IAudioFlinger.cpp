@@ -1022,6 +1022,7 @@ status_t BnAudioFlinger::onTransact(
     }
 
     std::string tag("IAudioFlinger command " + std::to_string(code));
+
     TimeCheck check(tag.c_str());
 
     switch (code) {

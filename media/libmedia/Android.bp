@@ -352,6 +352,10 @@ cc_library {
         "resourcemanager_aidl_interface-ndk_platform",
     ],
 
+    whole_static_libs: [
+        "libavmediaextentions",
+    ],
+
     export_include_dirs: [
         "include",
     ],

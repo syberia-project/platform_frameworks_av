@@ -30,6 +30,9 @@ cc_library_static {
         "frameworks/av/media/libstagefright/mpeg2ts",
         "frameworks/av/media/libstagefright/rtsp",
         "frameworks/av/media/libstagefright/timedtext",
+        "frameworks/av/media/libavextensions",
+        "frameworks/av/media/libmediaplayerservice",
+        "frameworks/av/media/libmediaextractor",
     ],
 
     cflags: [
@@ -53,6 +56,9 @@ cc_library_static {
         "libmedia",
         "libmediadrm",
         "libpowermanager",
+        "libhidlmemory",
+        "libcrypto",
+        "libcamera_client",
     ],
 
     static_libs: [

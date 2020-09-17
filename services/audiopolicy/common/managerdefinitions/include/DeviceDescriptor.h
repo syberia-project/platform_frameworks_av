@@ -252,6 +252,8 @@ public:
 
     void dump(String8 *dst, const String8 &tag, int spaces = 0, bool verbose = true) const;
 
+protected:
+    int     do_compare(const void* lhs, const void* rhs) const;
 private:
     void refreshTypes();
     DeviceTypeSet mDeviceTypes;

@@ -67,6 +67,7 @@
 #include <media/stagefright/SurfaceUtils.h>
 #include <private/android_filesystem_config.h>
 #include <utils/Singleton.h>
+#include <stagefright/AVExtensions.h>
 
 namespace android {
 
@@ -561,7 +562,7 @@ sp<MediaCodec> MediaCodec::CreateByType(
     for (size_t i = 0; i < matchingCodecs.size(); ++i) {
         sp<MediaCodec> codec = new MediaCodec(looper, pid, uid);
         AString componentName = matchingCodecs[i];
-        status_t ret = codec->init(componentName);
+        status_t ret = codec->init(componentName, true);
         if (err != NULL) {
             *err = ret;
         }
@@ -1028,7 +1029,7 @@ static CodecBase *CreateCCodec() {
 sp<CodecBase> MediaCodec::GetCodecBase(const AString &name, const char *owner) {
     if (owner) {
         if (strcmp(owner, "default") == 0) {
-            return new ACodec;
+            return AVFactory::get()->createACodec();
         } else if (strncmp(owner, "codec2", 6) == 0) {
             return CreateCCodec();
         }
@@ -1038,8 +1039,10 @@ sp<CodecBase> MediaCodec::GetCodecBase(const AString &name, const char *owner) {
         return CreateCCodec();
     } else if (name.startsWithIgnoreCase("omx.")) {
         // at this time only ACodec specifies a mime type.
-        return new ACodec;
-    } else if (name.startsWithIgnoreCase("android.filter.")) {
+        return AVFactory::get()->createACodec();
+    } else if (name.startsWithIgnoreCase("android.filter.qti")) {
+        return AVFactory::get()->createMediaFilter();
+    } else if (name.startsWithIgnoreCase("android.filter")) {
         return new MediaFilter;
     } else {
         return NULL;
@@ -1068,7 +1071,7 @@ static const CodecListCache &GetCodecListCache() {
     return sCache;
 }
 
-status_t MediaCodec::init(const AString &name) {
+status_t MediaCodec::init(const AString &name, bool nameIsType) {
     mResourceManagerProxy->init();
 
     // save init parameters for reset
@@ -1089,38 +1092,47 @@ status_t MediaCodec::init(const AString &name) {
             secureCodec = true;
             tmp.erase(tmp.size() - 7, 7);
         }
-        const sp<IMediaCodecList> mcl = MediaCodecList::getInstance();
-        if (mcl == NULL) {
-            mCodec = NULL;  // remove the codec.
-            return NO_INIT; // if called from Java should raise IOException
-        }
-        for (const AString &codecName : { name, tmp }) {
-            ssize_t codecIdx = mcl->findCodecByName(codecName.c_str());
-            if (codecIdx < 0) {
-                continue;
+
+        //make sure if the component name contains qcom/qti, we don't return error
+        //as these components are not present in media_codecs.xml and MediaCodecList won't find
+        //these component by findCodecByName
+        //Video and Flac decoder are present in list so exclude them.
+        if ((!(name.find("qcom", 0) > 0 || name.find("qti", 0) > 0 || name.find("filter", 0) > 0)
+              || name.find("video", 0) > 0 || name.find("flac", 0) > 0 || name.find("c2.qti", 0) >= 0)
+              && !(name.find("tme",0) > 0)) {
+            const sp<IMediaCodecList> mcl = MediaCodecList::getInstance();
+            if (mcl == NULL) {
+                mCodec = NULL;  // remove the codec.
+                return NO_INIT; // if called from Java should raise IOException
             }
-            mCodecInfo = mcl->getCodecInfo(codecIdx);
-            Vector<AString> mediaTypes;
-            mCodecInfo->getSupportedMediaTypes(&mediaTypes);
-            for (size_t i = 0; i < mediaTypes.size(); i++) {
-                if (mediaTypes[i].startsWith("video/")) {
-                    mIsVideo = true;
-                    break;
+            for (const AString &codecName : { name, tmp }) {
+                ssize_t codecIdx = mcl->findCodecByName(codecName.c_str());
+                if (codecIdx < 0) {
+                    continue;
                 }
+                mCodecInfo = mcl->getCodecInfo(codecIdx);
+                Vector<AString> mediaTypes;
+                mCodecInfo->getSupportedMediaTypes(&mediaTypes);
+                for (size_t i = 0; i < mediaTypes.size(); i++) {
+                    if (mediaTypes[i].startsWith("video/")) {
+                        mIsVideo = true;
+                        break;
+                    }
+                }
+                break;
             }
-            break;
+            if (mCodecInfo == nullptr) {
+                ALOGE("component not found");
+                return NAME_NOT_FOUND;
+            }
         }
-        if (mCodecInfo == nullptr) {
-            return NAME_NOT_FOUND;
-        }
-        owner = mCodecInfo->getOwnerName();
+        owner = (mCodecInfo) ? mCodecInfo->getOwnerName() : "default";
     }
 
     mCodec = GetCodecBase(name, owner);
     if (mCodec == NULL) {
         return NAME_NOT_FOUND;
     }
-
     if (mIsVideo) {
         // video codec needs dedicated looper
         if (mCodecLooper == NULL) {
@@ -1145,12 +1157,11 @@ status_t MediaCodec::init(const AString &name) {
                     new BufferCallback(new AMessage(kWhatCodecNotify, this))));
 
     sp<AMessage> msg = new AMessage(kWhatInit, this);
-    if (mCodecInfo) {
-        msg->setObject("codecInfo", mCodecInfo);
-        // name may be different from mCodecInfo->getCodecName() if we stripped
-        // ".secure"
-    }
+    msg->setObject("codecInfo", mCodecInfo);
+    // name may be different from mCodecInfo->getCodecName() if we stripped
+    // ".secure"
     msg->setString("name", name);
+    msg->setInt32("nameIsType", nameIsType);
 
     if (mMetricsHandle != 0) {
         mediametrics_setCString(mMetricsHandle, kCodecCodec, name.c_str());
@@ -1259,6 +1270,9 @@ status_t MediaCodec::configure(
     msg->setMessage("format", format);
     msg->setInt32("flags", flags);
     msg->setObject("surface", surface);
+    if (flags & CONFIGURE_FLAG_ENCODE) {
+        msg->setInt32("encoder", 1);
+    }
 
     if (crypto != NULL || descrambler != NULL) {
         if (crypto != NULL) {
@@ -1779,6 +1793,11 @@ status_t MediaCodec::getCodecInfo(sp<MediaCodecInfo> *codecInfo) const {
 
     sp<RefBase> obj;
     CHECK(response->findObject("codecInfo", &obj));
+
+    if (static_cast<MediaCodecInfo *>(obj.get()) == nullptr) {
+        ALOGE("codec info not found");
+        return NAME_NOT_FOUND;
+    }
     *codecInfo = static_cast<MediaCodecInfo *>(obj.get());
 
     return OK;
@@ -2745,12 +2764,13 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
             (void)msg->findObject("codecInfo", &codecInfo);
             AString name;
             CHECK(msg->findString("name", &name));
+            int32_t nameIsType;
+            msg->findInt32("nameIsType", &nameIsType);
 
             sp<AMessage> format = new AMessage;
-            if (codecInfo) {
-                format->setObject("codecInfo", codecInfo);
-            }
+            format->setObject("codecInfo", codecInfo);
             format->setString("componentName", name);
+            format->setInt32("nameIsType", nameIsType);
 
             mCodec->initiateAllocateComponent(format);
             break;
@@ -3789,7 +3809,12 @@ status_t MediaCodec::onQueueInputBuffer(const sp<AMessage> &msg) {
     }
 
     if (offset + size > buffer->capacity()) {
-        return -EINVAL;
+        if ( ((int)size < 0) && !(flags & BUFFER_FLAG_EOS)) {
+            size = 0;
+            ALOGD("EOS, reset size to zero");
+        } else {
+            return -EINVAL;
+        }
     }
 
     buffer->setRange(offset, size);
@@ -4149,6 +4174,9 @@ status_t MediaCodec::amendOutputFormatWithCodecSpecificData(
     AString mime;
     CHECK(mOutputFormat->findString("mime", &mime));
 
+    int32_t nalLengthBistream = 0;
+    mOutputFormat->findInt32("feature-nal-length-bitstream", &nalLengthBistream);
+
     if (!strcasecmp(mime.c_str(), MEDIA_MIMETYPE_VIDEO_AVC)) {
         // Codec specific data should be SPS and PPS in a single buffer,
         // each prefixed by a startcode (0x00 0x00 0x00 0x01).
@@ -4160,17 +4188,39 @@ status_t MediaCodec::amendOutputFormatWithCodecSpecificData(
         const uint8_t *data = buffer->data();
         size_t size = buffer->size();
 
-        const uint8_t *nalStart;
-        size_t nalSize;
-        while (getNextNALUnit(&data, &size, &nalStart, &nalSize, true) == OK) {
-            sp<ABuffer> csd = new ABuffer(nalSize + 4);
-            memcpy(csd->data(), "\x00\x00\x00\x01", 4);
-            memcpy(csd->data() + 4, nalStart, nalSize);
+        if (!memcmp(data, "\x00\x00\x00\x01", 4)) {
+            nalLengthBistream = 0;
+        }
+        if (!nalLengthBistream) {
+            const uint8_t *nalStart;
+            size_t nalSize;
+            while (getNextNALUnit(&data, &size, &nalStart, &nalSize, true) == OK) {
+                sp<ABuffer> csd = new ABuffer(nalSize + 4);
+                memcpy(csd->data(), "\x00\x00\x00\x01", 4);
+                memcpy(csd->data() + 4, nalStart, nalSize);
 
-            mOutputFormat->setBuffer(
-                    AStringPrintf("csd-%u", csdIndex).c_str(), csd);
+                mOutputFormat->setBuffer(
+                        AStringPrintf("csd-%u", csdIndex).c_str(), csd);
 
-            ++csdIndex;
+                ++csdIndex;
+            }
+        } else {
+            int32_t bytesLeft = size;
+            const uint8_t *tmp = data;
+            while (bytesLeft > 4) {
+                int32_t nalSize = 0;
+                std::copy(tmp, tmp+4, reinterpret_cast<uint8_t *>(&nalSize));
+                nalSize = ntohl(nalSize);
+                sp<ABuffer> csd = new ABuffer(nalSize + 4);
+                memcpy(csd->data(), tmp, nalSize + 4);
+
+                mOutputFormat->setBuffer(
+                        AStringPrintf("csd-%u", csdIndex).c_str(), csd);
+
+                tmp += nalSize + 4;
+                bytesLeft -= (nalSize + 4);
+                ++csdIndex;
+            }
         }
 
         if (csdIndex != 2) {

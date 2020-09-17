@@ -83,8 +83,9 @@ sp<IMemory> allocVideoFrame(const sp<MetaData>& trackMeta,
         tmp = width; width = height; height = tmp;
         tmp = displayWidth; displayWidth = displayHeight; displayHeight = tmp;
         tmp = tileWidth; tileWidth = tileHeight; tileHeight = tmp;
-        rotationAngle = 0;
     }
+    if (allocRotated)
+        rotationAngle = 0;
 
     VideoFrame frame(width, height, displayWidth, displayHeight,
             tileWidth, tileHeight, rotationAngle, dstBpp, !metaOnly, iccSize);
@@ -220,13 +221,15 @@ FrameDecoder::FrameDecoder(
         const AString &componentName,
         const sp<MetaData> &trackMeta,
         const sp<IMediaSource> &source)
-    : mComponentName(componentName),
+    : mIDRSent(false),
+      mComponentName(componentName),
       mTrackMeta(trackMeta),
       mSource(source),
       mDstFormat(OMX_COLOR_Format16bitRGB565),
       mDstBpp(2),
       mHaveMoreInputs(true),
       mFirstSample(true) {
+    ALOGD("FrameDecoder created");
 }
 
 FrameDecoder::~FrameDecoder() {
@@ -234,6 +237,7 @@ FrameDecoder::~FrameDecoder() {
         mDecoder->release();
         mSource->stop();
     }
+    ALOGD("FrameDecoder destroyed");
 }
 
 bool isHDR(const sp<AMessage> &format) {
@@ -352,6 +356,8 @@ status_t FrameDecoder::extractInternal() {
                     (void)mDecoder->queueInputBuffer(
                             index, 0, 0, 0, MediaCodec::BUFFER_FLAG_EOS);
                     err = OK;
+                    flags |= MediaCodec::BUFFER_FLAG_EOS;
+                    mHaveMoreInputs = true;
                 } else {
                     ALOGW("Input Error: err=%d", err);
                 }
@@ -426,7 +432,11 @@ status_t FrameDecoder::extractInternal() {
                         break;
                     }
                     if (mSurface != nullptr) {
-                        mDecoder->renderOutputBufferAndRelease(index);
+                        if (!shouldDropOutput(ptsUs)) {
+                            mDecoder->renderOutputBufferAndRelease(index);
+                        } else {
+                            mDecoder->releaseOutputBuffer(index);
+                        }
                         err = onOutputReceived(videoFrameBuffer, mOutputFormat, ptsUs, &done);
                     } else {
                         err = onOutputReceived(videoFrameBuffer, mOutputFormat, ptsUs, &done);
@@ -511,13 +521,17 @@ sp<AMessage> VideoFrameDecoder::onGetFormatAndSeekOptions(
     if (!isSeekingClosest) {
         videoFormat->setInt32("android._num-input-buffers", 1);
         videoFormat->setInt32("android._num-output-buffers", 1);
+        videoFormat->setInt32("thumbnail-mode", 1);
+        videoFormat->setInt32("vendor.qti-ext-dec-thumbnail-mode.value", 1);
     }
 
-    if (isHDR(videoFormat)) {
+    // force surface-mode for all thumbnails
+    if (true /*isHDR(videoFormat)*/) {
         *window = initSurface();
         if (*window == NULL) {
             ALOGE("Failed to init surface control for HDR, fallback to non-hdr");
         } else {
+            ALOGI("using surface mode");
             videoFormat->setInt32("color-format", OMX_COLOR_FormatAndroidOpaque);
         }
     }
@@ -543,11 +557,11 @@ status_t VideoFrameDecoder::onInputReceived(
         ALOGV("Seeking closest: targetTimeUs=%lld", (long long)mTargetTimeUs);
     }
 
-    if (mIsAvcOrHevc && !isSeekingClosest
-            && IsIDR(codecBuffer->data(), codecBuffer->size())) {
+    if ((mIsAvcOrHevc && !isSeekingClosest
+            && IsIDR(codecBuffer->data(), codecBuffer->size())) || (mIDRSent ==  true)) {
         // Only need to decode one IDR frame, unless we're seeking with CLOSEST
         // option, in which case we need to actually decode to targetTimeUs.
-        *flags |= MediaCodec::BUFFER_FLAG_EOS;
+        mIDRSent == false ? mIDRSent = true : *flags |= MediaCodec::BUFFER_FLAG_EOS;
     }
     int64_t durationUs;
     if (sampleMeta.findInt64(kKeyDuration, &durationUs)) {
@@ -567,10 +581,9 @@ status_t VideoFrameDecoder::onOutputReceived(
         durationUs = *mSampleDurations.begin();
         mSampleDurations.erase(mSampleDurations.begin());
     }
-    bool shouldOutput = (mTargetTimeUs < 0LL) || (timeUs >= mTargetTimeUs);
 
     // If this is not the target frame, skip color convert.
-    if (!shouldOutput) {
+    if (shouldDropOutput(timeUs)) {
         *done = false;
         return OK;
     }
@@ -581,13 +594,17 @@ status_t VideoFrameDecoder::onOutputReceived(
         return ERROR_MALFORMED;
     }
 
-    int32_t width, height, stride, srcFormat;
+    int32_t width, height, stride, srcFormat, slice_height;
     if (!outputFormat->findInt32("width", &width) ||
             !outputFormat->findInt32("height", &height) ||
             !outputFormat->findInt32("color-format", &srcFormat)) {
         ALOGE("format missing dimension or color: %s",
                 outputFormat->debugString().c_str());
         return ERROR_MALFORMED;
+    }
+
+    if (!outputFormat->findInt32("slice-height", &slice_height)) {
+        slice_height = height;
     }
 
     if (!outputFormat->findInt32("stride", &stride)) {
@@ -644,7 +661,7 @@ status_t VideoFrameDecoder::onOutputReceived(
     if (converter.isValid()) {
         converter.convert(
                 (const uint8_t *)videoFrameBuffer->data(),
-                width, height, stride,
+                width, slice_height, stride,
                 crop_left, crop_top, crop_right, crop_bottom,
                 mFrame->getFlattenedData(),
                 mFrame->mWidth, mFrame->mHeight, mFrame->mRowBytes,
@@ -793,10 +810,13 @@ sp<AMessage> ImageDecoder::onGetFormatAndSeekOptions(
 
     // TODO: Use Flexible color instead
     videoFormat->setInt32("color-format", OMX_COLOR_FormatYUV420Planar);
+    videoFormat->setInt32("vendor.qti-ext-dec-heif-mode.value", 1);
 
     if ((mGridRows == 1) && (mGridCols == 1)) {
         videoFormat->setInt32("android._num-input-buffers", 1);
         videoFormat->setInt32("android._num-output-buffers", 1);
+        videoFormat->setInt32("thumbnail-mode", 1);
+        videoFormat->setInt32("vendor.qti-ext-dec-thumbnail-mode.value", 1);
     }
     return videoFormat;
 }
@@ -847,10 +867,14 @@ status_t ImageDecoder::onOutputReceived(
         return ERROR_MALFORMED;
     }
 
-    int32_t width, height, stride;
+    int32_t width, height, stride, slice_height;
     CHECK(outputFormat->findInt32("width", &width));
     CHECK(outputFormat->findInt32("height", &height));
     CHECK(outputFormat->findInt32("stride", &stride));
+
+    if (!outputFormat->findInt32("slice-height", &slice_height)) {
+        slice_height = height;
+    }
 
     if (mFrame == NULL) {
         sp<IMemory> frameMem = allocVideoFrame(

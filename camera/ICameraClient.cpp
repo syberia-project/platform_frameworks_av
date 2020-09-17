@@ -52,6 +52,7 @@ public:
         data.writeInt32(msgType);
         data.writeInt32(ext1);
         if ((msgType == CAMERA_MSG_PREVIEW_FRAME) && (ext1 == CAMERA_FRAME_DATA_FD)) {
+            ALOGD("notifyCallback: CAMERA_MSG_PREVIEW_FRAME fd = %d", ext2);
             data.writeFileDescriptor(ext2);
         } else {
             data.writeInt32(ext2);
@@ -137,6 +138,7 @@ status_t BnCameraClient::onTransact(
             int32_t ext2    = 0;
             if ((msgType == CAMERA_MSG_PREVIEW_FRAME) && (ext1 == CAMERA_FRAME_DATA_FD)) {
                 ext2 = data.readFileDescriptor();
+                ALOGD("onTransact: CAMERA_MSG_PREVIEW_FRAME fd = %d", ext2);
             } else {
                 ext2 = data.readInt32();
             }

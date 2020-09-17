@@ -37,9 +37,12 @@
 #include <media/AudioSystem.h>
 #include <media/MediaMetricsItem.h>
 #include <media/TypeConverter.h>
+#include <binder/MemoryDealer.h>
+#include "media/AVMediaExtensions.h"
 
 #define WAIT_PERIOD_MS                  10
 #define WAIT_STREAM_END_TIMEOUT_SEC     120
+#define DUMMY_TRACK_SMP_BUF_SIZE        12000
 static const int kMaxLoopCountNotifications = 32;
 
 namespace android {
@@ -218,6 +221,7 @@ AudioTrack::AudioTrack()
       mPausedPosition(0),
       mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE),
       mRoutedDeviceId(AUDIO_PORT_HANDLE_NONE),
+      mPauseTimeRealUs(0),
       mAudioTrackCallback(new AudioTrackCallback())
 {
     mAttributes.content_type = AUDIO_CONTENT_TYPE_UNKNOWN;
@@ -250,6 +254,7 @@ AudioTrack::AudioTrack(
       mPreviousPriority(ANDROID_PRIORITY_NORMAL),
       mPreviousSchedulingGroup(SP_DEFAULT),
       mPausedPosition(0),
+      mPauseTimeRealUs(0),
       mAudioTrackCallback(new AudioTrackCallback())
 {
     mAttributes = AUDIO_ATTRIBUTES_INITIALIZER;
@@ -284,6 +289,8 @@ AudioTrack::AudioTrack(
       mPreviousSchedulingGroup(SP_DEFAULT),
       mPausedPosition(0),
       mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE),
+      mPauseTimeRealUs(0),
+      mTrackOffloaded(false),
       mAudioTrackCallback(new AudioTrackCallback())
 {
     mAttributes = AUDIO_ATTRIBUTES_INITIALIZER;
@@ -309,6 +316,15 @@ AudioTrack::~AudioTrack()
         .set(AMEDIAMETRICS_PROP_STATUS, (int32_t)mStatus)
         .record();
 
+    // To avoid A2DP session stop on remote device during Next/Prev of playback
+    // for split a2dp solution via offload path, create dummy Low latency session
+    // which will ensure session is active
+    if(isOffloadedOrDirect_l() &&
+       (AudioSystem::getDeviceConnectionState((audio_devices_t)
+        AUDIO_DEVICE_OUT_BLUETOOTH_A2DP,"") == AUDIO_POLICY_DEVICE_STATE_AVAILABLE)) {
+        ALOGD("Creating Dummy track for A2DP offload session");
+        createDummyAudioSessionForA2DP();
+    }
     if (mStatus == NO_ERROR) {
         // Make sure that callback function exits in the case where
         // it is looping on buffer full condition in obtainBuffer().
@@ -336,6 +352,50 @@ AudioTrack::~AudioTrack()
     }
 }
 
+void AudioTrack::createDummyAudioSessionForA2DP() {
+   sp<AudioTrack> dummyTrack;
+
+   // Do not create dummy session if session is paused more than 3 secs
+   if(mPauseTimeRealUs &&
+      ((systemTime(SYSTEM_TIME_MONOTONIC) / 1000ll) - mPauseTimeRealUs) >= 3000000ll)
+      return;
+
+   sp<MemoryDealer> heap;
+   sp<IMemory> iMem;
+   uint8_t* p;
+
+   heap = new MemoryDealer(1024*1024, "AudioTrack Heap Base");
+   iMem = heap->allocate(DUMMY_TRACK_SMP_BUF_SIZE*sizeof(short));
+   // TODO(b/142073222): Using unsecurePointer() has some associated security pitfalls
+   //       (see declaration for details).
+   //       Either document why it is safe in this case or address the
+   //       issue (e.g. by copying).
+   p = static_cast<uint8_t*>(iMem->unsecurePointer());
+   memset(p, '\0', DUMMY_TRACK_SMP_BUF_SIZE*sizeof(short));
+
+   dummyTrack = new AudioTrack(AUDIO_STREAM_MUSIC,// stream type
+                               48000, AUDIO_FORMAT_PCM_16_BIT,
+                               AUDIO_CHANNEL_OUT_STEREO, iMem,
+                               AUDIO_OUTPUT_FLAG_FAST);
+   status_t status = dummyTrack->initCheck();
+   if(status != NO_ERROR) {
+       dummyTrack.clear();
+       ALOGD("Dummry Track Failed for initCheck()");
+       iMem.clear();
+       heap.clear();
+       return;
+   }
+
+   // start play
+   ALOGD("split_a2dp dummy track start success");
+   dummyTrack->start();
+   usleep(10000);
+   dummyTrack->stop();
+   dummyTrack.clear();
+   iMem.clear();
+   heap.clear();
+   ALOGD("split_a2dp dummy track stop completed");
+}
 status_t AudioTrack::set(
         audio_stream_type_t streamType,
         uint32_t sampleRate,
@@ -442,7 +502,10 @@ status_t AudioTrack::set(
             goto exit;
         }
         mStreamType = streamType;
-
+        mAttributes.content_type = AUDIO_CONTENT_TYPE_UNKNOWN;
+        mAttributes.usage = AUDIO_USAGE_UNKNOWN;
+        mAttributes.flags = 0x0;
+        strcpy(mAttributes.tags, "");
     } else {
         // stream type shouldn't be looked at, this track has audio attributes
         memcpy(&mAttributes, pAttributes, sizeof(audio_attributes_t));
@@ -665,6 +728,7 @@ status_t AudioTrack::start()
 
 
     mInUnderrun = true;
+    mPauseTimeRealUs = 0;
 
     State previousState = mState;
     if (previousState == STATE_PAUSED_STOPPING) {
@@ -904,6 +968,7 @@ void AudioTrack::pause()
     }
     mProxy->interrupt();
     mAudioTrack->pause();
+    mPauseTimeRealUs = systemTime(SYSTEM_TIME_MONOTONIC) / 1000ll;
 
     if (isOffloaded_l()) {
         if (mOutput != AUDIO_IO_HANDLE_NONE) {
@@ -1105,6 +1170,12 @@ status_t AudioTrack::setPlaybackRate(const AudioPlaybackRate &playbackRate)
                 AMEDIAMETRICS_PROP_PLAYBACK_PITCH, (double)playbackRateTemp.mPitch)
         .record();
 
+
+    if (mTrackOffloaded &&
+        !isAudioPlaybackRateEqual(mPlaybackRate, AUDIO_PLAYBACK_RATE_DEFAULT)) {
+        ALOGD("invalidate track-offloaded track on setPlaybackRate");
+        android_atomic_or(CBLK_INVALID, &mCblk->mFlags);
+    }
     return NO_ERROR;
 }
 
@@ -1308,6 +1379,7 @@ status_t AudioTrack::getPosition(uint32_t *position)
     // There may be some latency differences between the HAL position and the proxy position.
     if (isOffloadedOrDirect_l() && !isPurePcmData_l()) {
         uint32_t dspFrames = 0;
+        status_t status;
 
         if (isOffloaded_l() && ((mState == STATE_PAUSED) || (mState == STATE_PAUSED_STOPPING))) {
             ALOGV("%s(%d): called in paused state, return cached position %u",
@@ -1318,8 +1390,11 @@ status_t AudioTrack::getPosition(uint32_t *position)
 
         if (mOutput != AUDIO_IO_HANDLE_NONE) {
             uint32_t halFrames; // actually unused
-            (void) AudioSystem::getRenderPosition(mOutput, &halFrames, &dspFrames);
-            // FIXME: on getRenderPosition() error, we return OK with frame position 0.
+            status = AudioSystem::getRenderPosition(mOutput, &halFrames, &dspFrames);
+            if (status != NO_ERROR) {
+                ALOGW("failed to getRenderPosition for offload session");
+                return INVALID_OPERATION;
+            }
         }
         // FIXME: dspFrames may not be zero in (mState == STATE_STOPPED || mState == STATE_FLUSHED)
         // due to hardware latency. We leave this behavior for now.
@@ -1541,6 +1616,12 @@ status_t AudioTrack::createTrack_l()
             input.clientInfo.clientTid = mAudioTrackThread->getTid();
         }
     }
+    // Set offload_info to defaults if track not already offloaded but can be offloaded
+    if (mOffloadInfo == NULL &&
+        audio_is_linear_pcm(mFormat) &&
+        isAudioPlaybackRateEqual(mPlaybackRate, AUDIO_PLAYBACK_RATE_DEFAULT)) {
+        input.config.offload_info = AUDIO_INFO_INITIALIZER;
+    }
     input.sharedBuffer = mSharedBuffer;
     input.notificationsPerBuffer = mNotificationsPerBufferReq;
     input.speed = 1.0;
@@ -1572,6 +1653,7 @@ status_t AudioTrack::createTrack_l()
     }
     ALOG_ASSERT(track != 0);
 
+    mTrackOffloaded = AVMediaUtils::get()->AudioTrackIsTrackOffloaded(output.outputId);
     mFrameCount = output.frameCount;
     mNotificationFramesAct = (uint32_t)output.notificationFrameCount;
     mRoutedDeviceId = output.selectedDeviceId;
@@ -2451,11 +2533,19 @@ status_t AudioTrack::restoreTrack_l(const char *from)
     // output parameters and new IAudioFlinger in createTrack_l()
     AudioSystem::clearAudioConfigCache();
 
-    if (isOffloadedOrDirect_l() || mDoNotReconnect) {
+    if (isOffloadedOrDirect_l() || mDoNotReconnect ||
+        (mOrigFlags & AUDIO_OUTPUT_FLAG_DIRECT) != 0) {
         // FIXME re-creation of offloaded and direct tracks is not yet implemented;
         // reconsider enabling for linear PCM encodings when position can be preserved.
-        result = DEAD_OBJECT;
-        return result;
+
+        // Tear down sink only for non-internal invalidation.
+        // Since new track could again have invalidation on setPlayback rate causing
+        // continuous creation and tear down.
+        if (!mTrackOffloaded ||
+              isAudioPlaybackRateEqual(mPlaybackRate, AUDIO_PLAYBACK_RATE_DEFAULT)) {
+            result = DEAD_OBJECT;
+            return result;
+        }
     }
 
     // Save so we can return count since creation.
@@ -2735,7 +2825,7 @@ status_t AudioTrack::getTimestamp_l(AudioTimestamp& timestamp)
     // To avoid a race, read the presented frames first.  This ensures that presented <= consumed.
 
     status_t status;
-    if (isOffloadedOrDirect_l()) {
+    if (isOffloadedOrDirect_l() || mTrackOffloaded) {
         // use Binder to get timestamp
         status = mAudioTrack->getTimestamp(timestamp);
     } else {
