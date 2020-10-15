@@ -1386,6 +1386,15 @@ std::function<sp<Codec2Buffer>()> LinearOutputBuffers::getAlloc() {
     };
 }
 
+// LinearMetadataOutputBuffers
+
+std::function<sp<Codec2Buffer>()> LinearMetadataOutputBuffers::getAlloc() {
+    return [format = mFormat]{
+        // TODO: proper max output size
+        return new LocalLinearMetadataBuffer(format, new ABuffer(kLinearBufferSize));
+    };
+}
+
 // GraphicOutputBuffers
 
 sp<Codec2Buffer> GraphicOutputBuffers::wrap(const std::shared_ptr<C2Buffer> &buffer) {
