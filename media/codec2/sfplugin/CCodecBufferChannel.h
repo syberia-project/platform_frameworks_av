@@ -32,6 +32,7 @@
 #include <media/stagefright/CodecBase.h>
 
 #include "CCodecBuffers.h"
+#include "FrameReassembler.h"
 #include "InputSurfaceWrapper.h"
 #include "PipelineWatcher.h"
 
@@ -273,6 +274,8 @@ private:
         size_t numExtraSlots;
         uint32_t inputDelay;
         uint32_t pipelineDelay;
+
+        FrameReassembler frameReassembler;
     };
     Mutexed<Input> mInput;
     struct Output {
