@@ -1387,6 +1387,7 @@ void NuPlayer::Renderer::postDrainVideoQueue() {
                                 - (1000 * mAudioSink->frameCount() / mAudioSink->getSampleRate()));
                 ALOGI("NOTE: First video buffer, wait audio for a while due to audio start"
                         "latency(%zuus)", audioStartLatency);
+                // use first buffer ts to update anchor
                 msg->setInt64("mediaTimeUs", mediaTimeUs);
                 msg->post(audioStartLatency);
                 mDrainVideoQueuePending = true;
