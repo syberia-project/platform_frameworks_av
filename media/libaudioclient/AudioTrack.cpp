@@ -298,8 +298,8 @@ AudioTrack::AudioTrack(
       mPausedPosition(0),
       mSelectedDeviceId(AUDIO_PORT_HANDLE_NONE),
       mPauseTimeRealUs(0),
-      mTrackOffloaded(false),
       mOpPackageName(opPackageName),
+      mTrackOffloaded(false),
       mAudioTrackCallback(new AudioTrackCallback())
 {
     mAttributes = AUDIO_ATTRIBUTES_INITIALIZER;
