@@ -2229,6 +2229,8 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
                                 }
                                 postPendingRepliesAndDeferredMessages(origin + ":dead");
                                 sendErrorResponse = false;
+                            } else if (!mReplyID) {
+                                sendErrorResponse = false;
                             }
                             break;
                         }
