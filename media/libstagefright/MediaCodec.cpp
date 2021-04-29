@@ -1155,31 +1155,25 @@ status_t MediaCodec::init(const AString &name, bool nameIsType) {
         if ((!(name.find("qcom", 0) > 0 || name.find("qti", 0) > 0 || name.find("filter", 0) > 0)
               || name.find("video", 0) > 0 || name.find("flac", 0) > 0 || name.find("c2.qti", 0) >= 0)
               && !(name.find("tme",0) > 0)) {
-            const sp<IMediaCodecList> mcl = MediaCodecList::getInstance();
-            if (mcl == NULL) {
-                mCodec = NULL;  // remove the codec.
-                return NO_INIT; // if called from Java should raise IOException
+          status_t err = mGetCodecInfo(name, &mCodecInfo);
+          if (err != OK) {
+            mCodec = NULL;  // remove the codec.
+            return err;
+          }
+
+          if (mCodecInfo == nullptr) {
+            ALOGE("Getting codec info with name '%s' failed", name.c_str());
+            return NAME_NOT_FOUND;
+          }
+          secureCodec = name.endsWith(".secure");
+          Vector<AString> mediaTypes;
+          mCodecInfo->getSupportedMediaTypes(&mediaTypes);
+          for (size_t i = 0; i < mediaTypes.size(); ++i) {
+            if (mediaTypes[i].startsWith("video/")) {
+              mIsVideo = true;
+              break;
             }
-            for (const AString &codecName : { name, tmp }) {
-                ssize_t codecIdx = mcl->findCodecByName(codecName.c_str());
-                if (codecIdx < 0) {
-                    continue;
-                }
-                mCodecInfo = mcl->getCodecInfo(codecIdx);
-                Vector<AString> mediaTypes;
-                mCodecInfo->getSupportedMediaTypes(&mediaTypes);
-                for (size_t i = 0; i < mediaTypes.size(); i++) {
-                    if (mediaTypes[i].startsWith("video/")) {
-                        mIsVideo = true;
-                        break;
-                    }
-                }
-                break;
-            }
-            if (mCodecInfo == nullptr) {
-                ALOGE("component not found");
-                return NAME_NOT_FOUND;
-            }
+          }
         }
         owner = (mCodecInfo) ? mCodecInfo->getOwnerName() : "default";
     }
