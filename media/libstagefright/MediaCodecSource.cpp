@@ -1098,6 +1098,8 @@ void MediaCodecSource::onMessageReceived(const sp<AMessage> &msg) {
         if (generation != mGeneration) {
              break;
         }
+
+        releaseEncoder();
         ALOGD("source (%s) stopping stalled", mIsVideo ? "video" : "audio");
         signalEOS();
         break;
