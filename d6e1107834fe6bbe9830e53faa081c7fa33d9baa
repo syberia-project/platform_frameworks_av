@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "5fdbb50f_26dba2fd",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 1
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 1000000
+      },
+      "writtenOn": "2021-09-28T09:17:04Z",
+      "side": 1,
+      "message": "Bad idea\n\nbetter to adapt this:\n\nhttps://github.com/syberia-project/platform_frameworks_av/commit/32edd57e1fa7cdd3cdc727596c072420243abdeb",
+      "revId": "d6e1107834fe6bbe9830e53faa081c7fa33d9baa",
+      "serverId": "42502b1d-019c-4a7f-8d4c-3cb7dd1b67f8"
+    }
+  ]
+}
