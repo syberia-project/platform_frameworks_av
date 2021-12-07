@@ -885,10 +885,7 @@ status_t MediaImageDecoder::onOutputReceived(
     int32_t width, height, stride;
     CHECK(outputFormat->findInt32("width", &width));
     CHECK(outputFormat->findInt32("height", &height));
-
-    if (!outputFormat->findInt32("stride", &stride)) {
-        stride = width;
-    }
+    CHECK(outputFormat->findInt32("stride", &stride));
 
     if (mFrame == NULL) {
         sp<IMemory> frameMem = allocVideoFrame(
