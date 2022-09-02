@@ -863,6 +863,10 @@ sp<AMessage> MediaImageDecoder::onGetFormatAndSeekOptions(
         videoFormat->setInt32("color-format", OMX_COLOR_FormatYUV420Planar);
     }
 
+    if (!isAvif(trackMeta())) {
+        videoFormat->setInt32("vendor.qti-ext-dec-heif-mode.value", 1);
+    }
+
     if ((mGridRows == 1) && (mGridCols == 1)) {
         videoFormat->setInt32("android._num-input-buffers", 1);
         videoFormat->setInt32("android._num-output-buffers", 1);
