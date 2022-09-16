@@ -269,12 +269,18 @@ Codec2ConfigurableClient::Codec2ConfigurableClient(
                     return "";
                 }
                 C2String outName;
+                if(base == nullptr) {
+                    return "";
+                }
                 Return<void> transStatus = base->getName(
                         [&outName](const hidl_string& name) {
                             outName = name.c_str();
                         });
                 return transStatus.isOk() ? outName : "";
             }()} {
+    if(!mBase) {
+        LOG(ERROR) << "Codec2ConfigurableClient -- transaction failed.";
+    }
 }
 
 c2_status_t Codec2ConfigurableClient::query(
