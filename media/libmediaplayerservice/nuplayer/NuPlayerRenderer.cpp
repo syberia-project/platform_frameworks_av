@@ -1529,6 +1529,8 @@ void NuPlayer::Renderer::notifyEOS_l(bool audio, status_t finalResult, int64_t d
                         mNextVideoTimeMediaUs + kDefaultVideoFrameIntervalUs);
             }
         }
+    } else {
+        mHasVideo = false;
     }
 }
 
@@ -1690,6 +1692,7 @@ void NuPlayer::Renderer::onFlush(const sp<AMessage> &msg) {
         } else {
             notifyComplete = mNotifyCompleteVideo;
             mNotifyCompleteVideo = false;
+            mHasVideo = false;
         }
 
         // If we're currently syncing the queues, i.e. dropping audio while
