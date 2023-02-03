@@ -548,14 +548,23 @@ status_t MediaCodecSource::initEncoder() {
             mEncoder->setCallback(mEncoderActivityNotify);
 
             AString codecName = matchingCodecs[ix];
-            bool isHWEnc = codecName.startsWith("c2.qti");
+            sp<MediaCodecInfo> mediaCodecInfo;
+            typename std::underlying_type<MediaCodecInfo::Attributes>::type attr = 0;
+            err = mEncoder->getCodecInfo(&mediaCodecInfo);
+            if (err == OK) {
+                attr = mediaCodecInfo->getAttributes();
+            }else{
+                return err;
+            }
+            bool isHWEnc = (attr & MediaCodecInfo::kFlagIsHardwareAccelerated) && codecName.startsWith("c2.qti");
 
             err = mEncoder->configure(
                         mOutputFormat,
                         NULL /* nativeWindow */,
                         NULL /* crypto */,
                         MediaCodec::CONFIGURE_FLAG_ENCODE |
-                        ((mIsVideo && isHWEnc) ? MediaCodec::CONFIGURE_FLAG_USE_BLOCK_MODEL : 0));
+                        ((mIsVideo && isHWEnc && (mFlags & FLAG_USE_SURFACE_INPUT)) ?
+                         MediaCodec::CONFIGURE_FLAG_USE_BLOCK_MODEL : 0));
 
             if (err == OK) {
                 break;
