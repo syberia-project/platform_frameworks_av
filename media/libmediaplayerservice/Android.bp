@@ -31,6 +31,7 @@ cc_library {
         "RemoteDisplay.cpp",
         "StagefrightRecorder.cpp",
         "TestPlayerStub.cpp",
+        "mpctl/PerfBoost.cpp",
     ],
 
     shared_libs: [
