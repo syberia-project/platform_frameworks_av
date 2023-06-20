@@ -296,6 +296,8 @@ void NuPlayer::Decoder::onConfigure(const sp<AMessage> &format) {
     mIsAudio = !strncasecmp("audio/", mime.c_str(), 6);
     mIsVideoAVC = !strcasecmp(MEDIA_MIMETYPE_VIDEO_AVC, mime.c_str());
 
+    logLatencyBegin(mIsAudio ? "audioStart" : "videoStart");
+
     mComponentName = mime;
     mComponentName.append(" decoder");
     ALOGV("[%s] onConfigure (surface=%p)", mComponentName.c_str(), mSurface.get());
@@ -394,6 +396,7 @@ void NuPlayer::Decoder::onConfigure(const sp<AMessage> &format) {
 
     mPaused = false;
     mResumePending = false;
+    logLatencyEnd(mIsAudio ? "audioStart" : "videoStart");
 }
 
 void NuPlayer::Decoder::onSetParameters(const sp<AMessage> &params) {

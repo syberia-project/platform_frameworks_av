@@ -105,6 +105,8 @@ struct NuPlayer : public AHandler {
     void setTargetBitrate(int bitrate /* bps */);
 
     void dump(AString& logString);
+    void logLatencyBegin(std::string strId);
+    void logLatencyEnd(std::string strId);
 
 protected:
     virtual ~NuPlayer();
@@ -200,6 +202,7 @@ private:
     int64_t mPreviousSeekTimeUs;
 
     List<sp<Action> > mDeferredActions;
+    std::unordered_map<std::string, std::chrono::time_point<std::chrono::system_clock>> mLatencyStartTime;
 
     bool mAudioEOS;
     bool mVideoEOS;
