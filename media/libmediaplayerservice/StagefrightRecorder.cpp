@@ -2045,6 +2045,10 @@ status_t StagefrightRecorder::setupVideoEncoder(
             format->setDouble("time-lapse-fps", mCaptureFps);
         }
     }
+    uid_t uid = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_uid_t(mAttributionSource.uid));
+    pid_t pid = VALUE_OR_RETURN_STATUS(aidl2legacy_int32_t_pid_t(mAttributionSource.pid));
+    format->setInt32("calling-uid", uid);
+    format->setInt32("calling-pid", pid);
 
     if (mOutputFormat == OUTPUT_FORMAT_RTP_AVP) {
         // This indicates that a raw image provided to encoder needs to be rotated.
