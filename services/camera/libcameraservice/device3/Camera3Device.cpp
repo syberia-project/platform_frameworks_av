@@ -335,6 +335,13 @@ status_t Camera3Device::disconnectImpl() {
                         // Continue to close device even in case of error
                     }
                 }
+                // Signal to request thread that we're not expecting any
+                // more requests. This will be true since once we're in
+                // disconnect and we've cleared off the request queue, the
+                // request thread can't receive any new requests through
+                // binder calls - since disconnect holds
+                // mBinderSerialization lock.
+                mRequestThread->setRequestClearing();
             }
             // Signal to request thread that we're not expecting any
             // more requests. This will be true since once we're in
@@ -3388,12 +3395,8 @@ status_t Camera3Device::RequestThread::waitUntilRequestProcessed(
 }
 
 void Camera3Device::RequestThread::requestExit() {
-    {
-        Mutex::Autolock l(mRequestLock);
-        mRequestClearing = true;
-        // Call parent to set up shutdown
-        Thread::requestExit();
-    }
+    // Call parent to set up shutdown
+    Thread::requestExit();
     // The exit from any possible waits
     mDoPauseSignal.signal();
     mRequestSignal.signal();
@@ -4515,6 +4518,11 @@ void Camera3Device::RequestThread::waitForNextRequestBatch() {
     }
 
     return;
+}
+
+void Camera3Device::RequestThread::setRequestClearing() {
+    Mutex::Autolock l(mRequestLock);
+    mRequestClearing = true;
 }
 
 sp<Camera3Device::CaptureRequest>
