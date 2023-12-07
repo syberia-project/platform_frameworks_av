@@ -70,10 +70,6 @@ class StatusTracker: public Thread {
 
     void dumpActiveComponents();
 
-    // Flush all pending states inflight in the tracker, and return upon
-    // completion.
-    void flushPendingStates();
-
     virtual void requestExit();
   protected:
 
@@ -116,11 +112,6 @@ class StatusTracker: public Thread {
     sp<Fence> mIdleFence;
     // Current overall device state
     ComponentState mDeviceState;
-
-    // For flushing all pending states transitions
-    bool mFlushed;
-    Mutex mFlushLock;
-    Condition mFlushCondition;
 
     // Private to threadLoop
 

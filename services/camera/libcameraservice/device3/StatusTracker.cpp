@@ -34,8 +34,7 @@ StatusTracker::StatusTracker(wp<Camera3Device> parent) :
         mParent(parent),
         mNextComponentId(0),
         mIdleFence(new Fence()),
-        mDeviceState(IDLE),
-        mFlushed(true) {
+        mDeviceState(IDLE) {
 }
 
 StatusTracker::~StatusTracker() {
@@ -112,33 +111,16 @@ void StatusTracker::markComponent(int id, ComponentState state,
         const sp<Fence>& componentFence) {
     ALOGV("%s: Component %d is now %s", __FUNCTION__, id,
             state == IDLE ? "idle" : "active");
+    Mutex::Autolock l(mPendingLock);
 
-    // If any component state changes, the status tracker is considered
-    // not flushed.
-    {
-        Mutex::Autolock l(mFlushLock);
-        mFlushed = false;
-    }
+    StateChange newState = {
+        id,
+        state,
+        componentFence
+    };
 
-    {
-        Mutex::Autolock l(mPendingLock);
-
-        StateChange newState = {
-            id,
-            state,
-            componentFence
-        };
-
-        mPendingChangeQueue.add(newState);
-        mPendingChangeSignal.signal();
-    }
-}
-
-void StatusTracker::flushPendingStates()  {
-    Mutex::Autolock l(mFlushLock);
-    while (!mFlushed && isRunning()) {
-        mFlushCondition.waitRelative(mFlushLock, kWaitDuration);
-    }
+    mPendingChangeQueue.add(newState);
+    mPendingChangeSignal.signal();
 }
 
 void StatusTracker::requestExit() {
@@ -146,7 +128,6 @@ void StatusTracker::requestExit() {
     Thread::requestExit();
     // Then exit any waits
     mPendingChangeSignal.signal();
-    mFlushCondition.signal();
 }
 
 StatusTracker::ComponentState StatusTracker::getDeviceStateLocked() {
@@ -249,17 +230,6 @@ bool StatusTracker::threadLoop() {
         }
     }
     mStateTransitions.clear();
-
-    // After all pending changes are cleared and notified, mark the tracker
-    // as flushed.
-    {
-        Mutex::Autolock fl(mFlushLock);
-        Mutex::Autolock pl(mPendingLock);
-        if (mPendingChangeQueue.size() == 0) {
-            mFlushed = true;
-            mFlushCondition.signal();
-        }
-    }
 
     if (waitForIdleFence) {
         auto ret = mIdleFence->wait(kWaitDuration);
