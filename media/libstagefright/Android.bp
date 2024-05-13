@@ -274,10 +274,10 @@ cc_library {
         "TableXInit.cpp" ,
         "ThrottledSource.cpp",
         "Utils.cpp",
-        "VideoRenderQualityTracker.cpp",
         "VideoFrameSchedulerBase.cpp",
         "VideoFrameScheduler.cpp",
-    ],
+        "VideoRenderQualityTracker.cpp",
+      ],
 
     shared_libs: [
         "libstagefright_framecapture_utils",
