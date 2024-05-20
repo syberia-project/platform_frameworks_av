@@ -343,13 +343,6 @@ status_t Camera3Device::disconnectImpl() {
                         // Continue to close device even in case of error
                     }
                 }
-                // Signal to request thread that we're not expecting any
-                // more requests. This will be true since once we're in
-                // disconnect and we've cleared off the request queue, the
-                // request thread can't receive any new requests through
-                // binder calls - since disconnect holds
-                // mBinderSerialization lock.
-                mRequestThread->setRequestClearing();
             }
         }
 
